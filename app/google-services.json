@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "255313094654",
+    "firebase_url": "https://haramalarme-default-rtdb.firebaseio.com",
+    "project_id": "haramalarme",
+    "storage_bucket": "haramalarme.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:255313094654:android:d14b9ff75f8e6619dbc2af",
+        "android_client_info": {
+          "package_name": "com.example.buscacelularbackground"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCChKSpm3FhWNTnot182GqqOAiseQF5y6I"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

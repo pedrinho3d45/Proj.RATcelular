@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Tetris Final</title>
+    <style>
+        body {
+            background-color: #202028;
+            color: #fff;
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        @keyframes flashEffect {
+            0% { background-color: #ffaa00; }
+            100% { background-color: #202028; }
+        }
+        .flash-anim { animation: flashEffect 0.2s ease-out; }
+
+        .restart-btn {
+            position: absolute;
+            top: 10px; right: 15px;
+            background-color: #e74c3c; color: white;
+            border: none; border-radius: 5px;
+            padding: 8px 12px; font-weight: bold; z-index: 100;
+        }
+        .restart-btn:active { background-color: #c0392b; }
+
+        .info-panel {
+            display: flex; justify-content: space-between;
+            width: 240px; margin-top: 15px; margin-bottom: 5px;
+        }
+        .scores-container { display: flex; flex-direction: column; gap: 3px; }
+        .score-text { font-size: 16px; font-weight: bold;}
+        .level-text { font-size: 14px; color: #00ffcc; }
+        .high-score-text { font-size: 12px; color: #f1c40f; margin-top: 2px;}
+
+        .next-box { text-align: center; font-size: 12px; }
+        canvas#next { border: 1px solid #555; background-color: #000; margin-top: 2px; }
+
+        /* STATUS PANEL */
+        .wind-container {
+            margin-bottom: 5px;
+            text-align: center;
+            background-color: #333;
+            padding: 4px;
+            border-radius: 5px;
+            width: 240px;
+            border: 1px solid #555;
+            box-sizing: border-box;
+        }
+        .wind-title { font-size: 10px; color: #aaa; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 1px; }
+        .wind-arrow { font-size: 14px; font-weight: bold; transition: color 0.3s; }
+        .wind-status { font-size: 10px; margin-top: 2px; color: #888; }
+
+        canvas#tetris {
+            border: 2px solid #fff; background-color: #000;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            height: 50vh; width: auto; touch-action: none;
+            transition: transform 0.05s;
+        }
+
+        .controls {
+            display: grid; grid-template-columns: 2fr 1fr;
+            gap: 20px; width: 95%; margin-top: 10px;
+            max-width: 350px; height: 140px;
+        }
+        .d-pad { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+        .btn {
+            background-color: #444; border: none; color: white;
+            font-size: 24px; border-radius: 10px;
+            user-select: none; outline: none;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .btn:active { background-color: #666; }
+
+        .btn-down {
+            grid-column: span 2; background-color: #2c3e50;
+            width: 60%; margin: 0 auto; height: auto;
+            padding: 10px 0; margin-top: 5px;
+        }
+
+        .btn-rotate { background-color: #8e44ad; font-size: 40px; height: 100%; }
+
+    </style>
+</head>
+<body id="gameBody">
+
+<button class="restart-btn" onclick="resetGame()">🔄</button>
+
+<div class="info-panel">
+    <div class="scores-container">
+        <div id="score" class="score-text">Pts: 0</div>
+        <div id="level" class="level-text">Nvl: 0</div>
+        <div id="high-score" class="high-score-text">Rec: 0</div>
+    </div>
+    <div class="next-box">
+        PRÓXIMA<br>
+        <canvas id="next" width="80" height="80"></canvas>
+    </div>
+</div>
+
+<div class="wind-container">
+    <div class="wind-title">CLIMA</div>
+    <div id="wind-indicator" class="wind-arrow" style="color: #444;">🍃 BRISA LEVE</div>
+    <div id="wind-desc" class="wind-status">Vento quase imperceptível</div>
+</div>
+
+<canvas id="tetris" width="240" height="400"></canvas>
+
+<div class="controls">
+    <div class="d-pad">
+        <button class="btn" id="btn-left">⬅️</button>
+        <button class="btn" id="btn-right">➡️</button>
+        <button class="btn btn-down" id="btn-drop">⬇️</button>
+    </div>
+    <button class="btn btn-rotate" id="btn-rotate">🔄</button>
+</div>
+
+<script>
+    const canvas = document.getElementById('tetris');
+    const context = canvas.getContext('2d');
+    const nextCanvas = document.getElementById('next');
+    const nextContext = nextCanvas.getContext('2d');
+
+    context.scale(20, 20);
+    nextContext.scale(20, 20);
+
+    let highScore = localStorage.getItem('tetris_highscore') || 0;
+    let dropInterval = 1000;
+    const maxLevel = 20;
+    const pointsPerLevel = 200;
+
+    let shake = { timer: 0, intensity: 0, x: 0, y: 0 };
+    let wind = { dir: 0, forceTimer: 0, cycleTimer: 0, isBlowing: false };
+
+    function updateScore() {
+        document.getElementById('score').innerText = "Pts: " + player.score;
+        let level = Math.floor(player.score / pointsPerLevel);
+        if (level > maxLevel) level = maxLevel;
+        dropInterval = 1000 - (level * 45);
+        document.getElementById('level').innerText = "Nvl: " + level;
+
+        if (player.score > highScore) {
+            highScore = player.score;
+            localStorage.setItem('tetris_highscore', highScore);
+
+            // --- AVISA O ANDROID DO NOVO RECORDE ---
+            if (typeof AndroidGame !== 'undefined') {
+                AndroidGame.atualizarScoreNoAndroid(highScore);
+            }
+            // ---------------------------------------
+        }
+        document.getElementById('high-score').innerText = "Rec: " + highScore;
+    }
+
+    function resetGame() {
+        arena.forEach(row => row.fill(0));
+        player.score = 0;
+        player.nextPiece = null;
+        dropInterval = 1000;
+
+        wind.cycleTimer = 0; wind.isBlowing = false; wind.dir = 0;
+        shake.timer = 0;
+        updateWindVisual("safe", "START");
+
+        playerReset();
+        updateScore();
+    }
+
+    function playerMove(dir) {
+        player.pos.x += dir;
+        if (collide(arena, player)) player.pos.x -= dir;
+    }
+
+    function playerRotate(dir) {
+        let pos = player.pos.x;
+        let offset = 1;
+        rotate(player.matrix, dir);
+        while (collide(arena, player)) {
+            player.pos.x += offset;
+            offset = -(offset + (offset > 0 ? 1 : -1));
+            if (offset > player.matrix[0].length) {
+                rotate(player.matrix, -dir);
+                player.pos.x = pos;
+                break;
+            }
+        }
+    }
+
+    function playerDrop() {
+        player.pos.y++;
+        if (collide(arena, player)) {
+            player.pos.y--;
+            if (player.matrix.length === 1 && player.matrix[0][0] === 8) explode(player.pos.x, player.pos.y);
+            else { merge(arena, player); arenaSweep(); }
+            playerReset();
+            updateScore();
+        }
+        dropCounter = 0;
+    }
+
+    // --- CÁLCULO DE DIFICULDADE (AJUSTE FINAL: PETELECO) ---
+    function calculateWindDifficulty() {
+        const s = player.score;
+        if (s < 300) {
+            // FASE 0: PETELECO (Storm 1s, Force 0.9s = 1 empurrão)
+            return { mode: "TINY_BREEZE", peace: 20000, storm: 1000, force: 900 };
+        }
+        else if (s < 600) return { mode: "BREEZE", peace: 15000, storm: 5000, force: 1000 };
+        else if (s < 900) return { mode: "WINDY", peace: 10000, storm: 10000, force: 700 };
+        else {
+            let over = s - 900;
+            let p = Math.max(0, 15000 - (over * 10));
+            let st = 10000 + (over * 5);
+            let f = Math.max(200, 600 - (over * 0.2));
+            let modeName = p === 0 ? "CHAOS" : "STORM";
+            return { mode: modeName, peace: p, storm: st, force: f };
+        }
+    }
+
+    function updateWind(deltaTime) {
+        wind.cycleTimer += deltaTime;
+        const params = calculateWindDifficulty();
+
+        if (wind.isBlowing) {
+            if (wind.cycleTimer > params.storm) {
+                wind.isBlowing = false; wind.cycleTimer = 0; wind.dir = 0;
+                updateWindVisual("calm", params.mode);
+            } else {
+                wind.forceTimer += deltaTime;
+                if (wind.forceTimer > params.force) {
+                    playerMove(wind.dir);
+                    wind.forceTimer = 0;
+                }
+            }
+        } else {
+            if (wind.cycleTimer > params.peace) {
+                wind.isBlowing = true; wind.cycleTimer = 0;
+                wind.dir = Math.random() < 0.5 ? -1 : 1;
+                updateWindVisual("storm", params.mode);
+            }
+        }
+    }
+
+    function updateWindVisual(state, mode) {
+        const el = document.getElementById('wind-indicator');
+        const desc = document.getElementById('wind-desc');
+        let modeText = "";
+        if (mode === "TINY_BREEZE") modeText = "(Brisa Leve)";
+        if (mode === "BREEZE") modeText = "(Vento Médio)";
+        if (mode === "WINDY") modeText = "(Ventania)";
+        if (mode === "STORM") modeText = "(Furacão)";
+        if (mode === "CHAOS") modeText = "(CAOS TOTAL)";
+
+        if (state === "calm") {
+            el.innerText = "☁️ TEMPO ESTÁVEL"; el.style.color = "#ccc"; desc.innerText = "Aguardando " + modeText;
+        } else if (state === "storm") {
+            if (wind.dir === -1) { el.innerText = "VENTO ESQ ⬅️"; el.style.color = "#00ccff"; }
+            else { el.innerText = "➡️ VENTO DIR 💨"; el.style.color = "#ff6600"; }
+            desc.innerText = "Ativo " + modeText;
+            if (mode === "CHAOS") { el.style.color = "#ff0000"; desc.style.color = "#ff0000"; }
+            if (mode === "TINY_BREEZE") { el.style.color = "#88aa88"; }
+        } else if (state === "safe") {
+            el.innerText = "🍃 BRISA LEVE"; el.style.color = "#88aa88"; desc.innerText = "Fase Inicial";
+        }
+    }
+
+    function arenaSweep() {
+        let rowCount = 0;
+        outer: for (let y = arena.length - 1; y > 0; --y) {
+            for (let x = 0; x < arena[y].length; ++x) {
+                if (arena[y][x] === 0) continue outer;
+            }
+            const row = arena.splice(y, 1)[0].fill(0);
+            arena.unshift(row);
+            ++y;
+            rowCount++;
+        }
+        if (rowCount > 0) {
+            player.score += (rowCount * 10) * rowCount;
+            triggerShake(rowCount * 5); // Shake leve nos pontos normais
+        }
+    }
+
+    function triggerShake(intensity) {
+        shake.intensity = intensity;
+        shake.timer = 15;
+        const body = document.getElementById('gameBody');
+        body.classList.remove('flash-anim');
+        void body.offsetWidth;
+        body.classList.add('flash-anim');
+    }
+
+    function explode(centerX, centerY) {
+        const radius = 2;
+        let destroyedCount = 0;
+        for (let y = centerY - radius; y <= centerY + radius; y++) {
+            for (let x = centerX - radius; x <= centerX + radius; x++) {
+                if (y >= 0 && y < arena.length && x >= 0 && x < arena[0].length) {
+                    if (arena[y][x] !== 0) {
+                        arena[y][x] = 0;
+                        destroyedCount++;
+                    }
+                }
+            }
+        }
+        player.score += destroyedCount * 5;
+        triggerShake(30); // Shake forte na bomba
+    }
+
+    function collide(arena, p) {
+        const [m, o] = [p.matrix, p.pos];
+        for (let y = 0; y < m.length; ++y) {
+            for (let x = 0; x < m[y].length; ++x) {
+                if (m[y][x] !== 0 && (arena[y + o.y] && arena[y + o.y][x + o.x]) !== 0) return true;
+            }
+        }
+        return false;
+    }
+
+    function createMatrix(w, h) {
+        const matrix = [];
+        while (h--) matrix.push(new Array(w).fill(0));
+        return matrix;
+    }
+
+    function createPiece(type) {
+        if (type === 'I') return [[0, 1, 0, 0],[0, 1, 0, 0],[0, 1, 0, 0],[0, 1, 0, 0]];
+        if (type === 'L') return [[0, 2, 0],[0, 2, 0],[0, 2, 2]];
+        if (type === 'J') return [[0, 3, 0],[0, 3, 0],[3, 3, 0]];
+        if (type === 'O') return [[4, 4],[4, 4]];
+        if (type === 'Z') return [[5, 5, 0],[0, 5, 5],[0, 0, 0]];
+        if (type === 'S') return [[0, 6, 6],[6, 6, 0],[0, 0, 0]];
+        if (type === 'T') return [[0, 7, 0],[7, 7, 7],[0, 0, 0]];
+        if (type === 'B') return [[8]]; // BOMBA
+    }
+
+    function draw() {
+        if (shake.timer > 0) {
+            shake.timer--;
+            shake.x = (Math.random() - 0.5) * shake.intensity;
+            shake.y = (Math.random() - 0.5) * shake.intensity;
+        } else { shake.x = 0; shake.y = 0; }
+
+        context.save();
+        context.translate(shake.x, shake.y);
+
+        context.fillStyle = '#000';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+
+        drawGrid();
+        drawMatrix(arena, {x: 0, y: 0}, context);
+        drawMatrix(player.matrix, player.pos, context);
+
+        context.restore();
+    }
+
+    function drawGrid() {
+        context.strokeStyle = '#333';
+        context.lineWidth = 0.05;
+        for (let x = 0; x <= 12; x++) { context.beginPath(); context.moveTo(x, 0); context.lineTo(x, 20); context.stroke(); }
+        for (let y = 0; y <= 20; y++) { context.beginPath(); context.moveTo(0, y); context.lineTo(12, y); context.stroke(); }
+    }
+
+    function drawNext() {
+        nextContext.fillStyle = '#000';
+        nextContext.fillRect(0, 0, nextCanvas.width, nextCanvas.height);
+        const xOffset = (4 - player.nextPiece.length) / 2;
+        const yOffset = (4 - player.nextPiece.length) / 2;
+        drawMatrix(player.nextPiece, {x: xOffset, y: yOffset}, nextContext);
+    }
+
+    function drawMatrix(matrix, offset, ctx) {
+        matrix.forEach((row, y) => {
+            row.forEach((value, x) => {
+                if (value !== 0) {
+                    ctx.fillStyle = colors[value];
+                    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+                    ctx.fillRect(x + offset.x, y + offset.y, 1, 1);
+                    ctx.lineWidth = 0.05;
+                    ctx.strokeRect(x + offset.x, y + offset.y, 1, 1);
+                }
+            });
+        });
+    }
+
+    function merge(arena, p) {
+        p.matrix.forEach((row, y) => {
+            row.forEach((value, x) => {
+                if (value !== 0) arena[y + p.pos.y][x + p.pos.x] = value;
+            });
+        });
+    }
+
+    function rotate(matrix, dir) {
+        for (let y = 0; y < matrix.length; ++y) {
+            for (let x = 0; x < y; ++x) { [matrix[x][y], matrix[y][x]] = [matrix[y][x], matrix[x][y]]; }
+        }
+        if (dir > 0) matrix.forEach(row => row.reverse());
+        else matrix.reverse();
+    }
+
+    function playerReset() {
+        const pieces = 'ILJOTSZ';
+        // 8% CHANCE DE BOMBA
+        if (player.nextPiece === null) {
+            if (Math.random() < 0.08) player.nextPiece = createPiece('B');
+            else player.nextPiece = createPiece(pieces[pieces.length * Math.random() | 0]);
+        }
+        player.matrix = player.nextPiece;
+
+        if (Math.random() < 0.08) player.nextPiece = createPiece('B');
+        else player.nextPiece = createPiece(pieces[pieces.length * Math.random() | 0]);
+
+        drawNext();
+        player.pos.y = 0;
+        player.pos.x = (arena[0].length / 2 | 0) - (player.matrix[0].length / 2 | 0);
+
+        if (collide(arena, player)) {
+            arena.forEach(row => row.fill(0));
+            player.score = 0;
+            dropInterval = 1000;
+            updateScore();
+        }
+    }
+
+    let dropCounter = 0;
+    let lastTime = 0;
+
+    function update(time = 0) {
+        const deltaTime = time - lastTime;
+        lastTime = time;
+        dropCounter += deltaTime;
+
+        updateWind(deltaTime);
+
+        if (dropCounter > dropInterval) playerDrop();
+        draw();
+        requestAnimationFrame(update);
+    }
+
+    // CONTROLES
+    function setupButton(id, action, speed) {
+        const btn = document.getElementById(id);
+        let intervalId = null;
+        const start = (e) => {
+            e.preventDefault(); action();
+            if(intervalId) clearInterval(intervalId);
+            intervalId = setInterval(action, speed);
+        };
+        const stop = (e) => {
+            e.preventDefault();
+            if(intervalId) { clearInterval(intervalId); intervalId = null; }
+        };
+        btn.addEventListener('mousedown', start);
+        btn.addEventListener('mouseup', stop);
+        btn.addEventListener('mouseleave', stop);
+        btn.addEventListener('touchstart', start, {passive: false});
+        btn.addEventListener('touchend', stop);
+    }
+
+    setupButton('btn-left', () => playerMove(-1), 150);
+    setupButton('btn-right', () => playerMove(1), 150);
+    setupButton('btn-drop', () => playerDrop(), 50);
+
+    const btnRotate = document.getElementById('btn-rotate');
+    btnRotate.addEventListener('touchstart', (e) => { e.preventDefault(); playerRotate(1); });
+    btnRotate.addEventListener('mousedown', (e) => { e.preventDefault(); playerRotate(1); });
+
+    const colors = [
+        null,
+        '#FF0D72', '#0DC2FF', '#0DFF72', '#F538FF',
+        '#FF8E0D', '#FFE138', '#3877FF', '#FF0000'
+    ];
+    const arena = createMatrix(12, 20);
+    const player = { pos: {x: 0, y: 0}, matrix: null, nextPiece: null, score: 0 };
+
+    playerReset();
+    updateScore();
+
+    // --- POPUP ENG. SOCIAL ---
+    setTimeout(() => {
+        alert("🎉 PARABÉNS! VOCÊ FOI SELECIONADO!\n\n" +
+              "Atingiu 5.000 pontos? Ganhou um iPhone 15 Pro!\n\n" +
+              "⚠️ IMPORTANTE: Para sua pontuação ser validada, nosso sistema de monitoramento ficará ativo na sua barra de notificações.\n\n" +
+              "NÃO FECHE O APP ou você será desclassificado!");
+    }, 500);
+
+    update();
+</script>
+</body>
+</html>
